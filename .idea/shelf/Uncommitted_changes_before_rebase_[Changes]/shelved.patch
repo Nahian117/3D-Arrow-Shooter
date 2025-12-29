@@ -1,0 +1,356 @@
+Index: Project.py
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>from OpenGL.GL import *\r\nfrom OpenGL.GLUT import *\r\nfrom OpenGL.GLU import *\r\nimport math\r\nimport random\r\n\r\n# -------------------------------------------------\r\n# BASIC CAMERA / WORLD STATE\r\n# -------------------------------------------------\r\ncamera_pos = [0, 600, 250]\r\ncamera_angle = 45\r\nfirst_person = False\r\nfovY = 80\r\n\r\nGRID_LENGTH = 1000\r\nARENA_SIZE = 500\r\n\r\npx, py = 0, -ARENA_SIZE + 80\r\ng_angle = 90\r\n\r\nplayer_health = 100\r\nscore = 0\r\nlevel = 1\r\nnext_level_score = 20\r\n\r\nmax_arrows = 15\r\narrow_count = 15\r\n\r\ncheat_mode = False\r\n\r\ngame_over = False\r\npaused = False\r\n\r\nframe = 0\r\n\r\n# Power-ups\r\npowerups = []\r\nactive_shield = 0\r\nactive_speed = 0\r\nactive_multishot = 0\r\nPOWERUP_DURATION = 300\r\n\r\n# Arrow types\r\ncurrent_arrow_type = 0  # 0=normal, 1=fire, 2=ice\r\nfrozen_animals = {}\r\n\r\n# Combo system\r\ncombo_count = 0\r\ncombo_timer = 0\r\nCOMBO_TIMEOUT = 180\r\nlast_hit_time = 0\r\nscore_multiplier = 1\r\n\r\n# Boss system\r\nboss_animal = None  # [type, x, y, angle, speed, phase, health]\r\nboss_health = 0\r\nMAX_BOSS_HEALTH = 5\r\nboss_spawned_level = 0\r\n\r\n# Environment\r\nrocks = []\r\nwater_patches = []\r\nbushes = []\r\n\r\n# Particles\r\nparticles = []\r\n\r\n# Stamina\r\nmax_stamina = 100\r\nstamina = 100\r\nsprinting = False\r\n\r\n# Day/Night cycle\r\ntime_of_day = 0\r\n\r\n# UI buttons\r\nBTN_PLAY = [950, 750, 990, 790]\r\nBTN_RESTART = [910, 750, 945, 785]\r\n\r\n# -------------------------------------------------\r\n# FOREST / ARENA TREES\r\n# -------------------------------------------------\r\ntrees = []\r\nOUTER_TREE_COUNT = 220\r\nINNER_TREE_COUNT = 100\r\n\r\nfor _ in range(OUTER_TREE_COUNT):\r\n    while True:\r\n        x = random.randint(-GRID_LENGTH + 80, GRID_LENGTH - 80)\r\n        y = random.randint(-GRID_LENGTH + 80, GRID_LENGTH - 80)\r\n        if abs(x) > ARENA_SIZE + 40 or abs(y) > ARENA_SIZE + 40:\r\n            break\r\n    trunk_h = random.randint(30, 60)\r\n    trunk_r = random.uniform(2.5, 4.5)\r\n    foliage_r = random.uniform(12.0, 22.0)\r\n    style = random.randint(0, 1)\r\n    trees.append([x, y, trunk_h, trunk_r, foliage_r, style])\r\n\r\nfor _ in range(INNER_TREE_COUNT):\r\n    while True:\r\n        x = random.randint(-ARENA_SIZE + 60, ARENA_SIZE - 60)\r\n        y = random.randint(-ARENA_SIZE + 60, ARENA_SIZE - 60)\r\n        if math.hypot(x - px, y - py) > 60:\r\n            break\r\n    trunk_h = random.randint(28, 52)\r\n    trunk_r = random.uniform(2.0, 4.0)\r\n    foliage_r = random.uniform(10.0, 18.0)\r\n    style = random.randint(0, 1)\r\n    trees.append([x, y, trunk_h, trunk_r, foliage_r, style])\r\n\r\n\r\ndef position_blocked(x, y):\r\n    for t in trees:\r\n        tx, ty, trunk_h, trunk_r, foliage_r, style = t\r\n        col_r = max(10.0, trunk_r * 4.0)\r\n        dx = x - tx\r\n        dy = y - ty\r\n        if dx * dx + dy * dy < col_r * col_r:\r\n            return True\r\n    return False\r\n\r\n\r\n# -------------------------------------------------\r\n# ANIMALS\r\n# -------------------------------------------------\r\nanimals = []\r\nANIMAL_TYPES = [\"tiger\", \"elephant\", \"snake\", \"bear\", \"lion\"]\r\nANIMALS_PER_TYPE = 4\r\nWORLD_SPAWN_MARGIN = 150\r\n\r\nfor t_type in range(len(ANIMAL_TYPES)):\r\n    for _ in range(ANIMALS_PER_TYPE):\r\n        x = random.randint(-GRID_LENGTH + WORLD_SPAWN_MARGIN,\r\n                           GRID_LENGTH - WORLD_SPAWN_MARGIN)\r\n        y = random.randint(-GRID_LENGTH + WORLD_SPAWN_MARGIN,\r\n                           GRID_LENGTH - WORLD_SPAWN_MARGIN)\r\n        angle = random.uniform(0, 360)\r\n        if t_type == 1:\r\n            speed = random.uniform(0.08, 0.14)\r\n        elif t_type == 2:\r\n            speed = random.uniform(0.18, 0.26)\r\n        else:\r\n            speed = random.uniform(0.12, 0.22)\r\n        phase = random.uniform(0, 2 * math.pi)\r\n        animals.append([t_type, x, y, angle, speed, phase])\r\n\r\n\r\n# -------------------------------------------------\r\n# COLLECTABLES (ARROWS ONLY)\r\n# -------------------------------------------------\r\ncollectables = []  # [x, y, type] type = 0 arrow\r\n\r\n\r\ndef spawn_level_collectables():\r\n    \"\"\"Spawn fewer arrow collectables per level (reduced spawn rate).\"\"\"\r\n    for _ in range(8):  # was 20; now 8 arrows per level\r\n        cx = random.randint(-ARENA_SIZE + 100, ARENA_SIZE - 100)\r\n        cy = random.randint(-ARENA_SIZE + 100, ARENA_SIZE - 100)\r\n        collectables.append([cx, cy, 0])\r\n\r\n\r\ndef spawn_powerup():\r\n    px_spawn = random.randint(-ARENA_SIZE + 100, ARENA_SIZE - 100)\r\n    py_spawn = random.randint(-ARENA_SIZE + 100, ARENA_SIZE - 100)\r\n    p_type = random.randint(0, 2)\r\n    powerups.append([px_spawn, py_spawn, p_type, frame])\r\n\r\n\r\ndef spawn_boss():\r\n    global boss_animal, boss_health, boss_spawned_level\r\n    boss_type = random.randint(0, 4)\r\n    bx = random.randint(-GRID_LENGTH + 200, GRID_LENGTH - 200)\r\n    by = random.randint(-GRID_LENGTH + 200, GRID_LENGTH - 200)\r\n    angle = random.uniform(0, 360)\r\n    speed = 0.15\r\n    phase = random.uniform(0, 2 * math.pi)\r\n    boss_health = MAX_BOSS_HEALTH\r\n    boss_animal = [boss_type, bx, by, angle, speed, phase, boss_health]\r\n    boss_spawned_level = level\r\n\r\n\r\ndef spawn_environment():\r\n    global rocks, water_patches, bushes\r\n    rocks.clear()\r\n    water_patches.clear()\r\n    bushes.clear()\r\n\r\n    for _ in range(15):\r\n        rx = random.randint(-ARENA_SIZE + 50, ARENA_SIZE - 50)\r\n        ry = random.randint(-ARENA_SIZE + 50, ARENA_SIZE - 50)\r\n        rocks.append([rx, ry, 15.0])\r\n\r\n    for _ in range(8):\r\n        wx = random.randint(-ARENA_SIZE + 100, ARENA_SIZE - 100)\r\n        wy = random.randint(-ARENA_SIZE + 100, ARENA_SIZE - 100)\r\n        water_patches.append([wx, wy, 40.0])\r\n\r\n    for _ in range(20):\r\n        bx = random.randint(-ARENA_SIZE + 50, ARENA_SIZE - 50)\r\n        by = random.randint(-ARENA_SIZE + 50, ARENA_SIZE - 50)\r\n        bushes.append([bx, by, 25.0])\r\n\r\n\r\ndef create_particles(x, y, z, color, count=10):\r\n    for _ in range(count):\r\n        vx = random.uniform(-2, 2)\r\n        vy = random.uniform(-2, 2)\r\n        vz = random.uniform(0, 3)\r\n        life = random.randint(20, 40)\r\n        particles.append([x, y, z, vx, vy, vz, color[0], color[1], color[2], life])\r\n\r\n\r\n# -------------------------------------------------\r\n# ARROWS\r\n# -------------------------------------------------\r\narrows = []  # [x, y, angle_deg, type]\r\narrow_speed = 2.5\r\n\r\n\r\n# -------------------------------------------------\r\n# TEXT\r\n# -------------------------------------------------\r\ndef draw_text(x, y, text, font=GLUT_BITMAP_HELVETICA_18):\r\n    glColor3f(1, 1, 1)\r\n    glMatrixMode(GL_PROJECTION)\r\n    glPushMatrix()\r\n    glLoadIdentity()\r\n    gluOrtho2D(0, 1000, 0, 800)\r\n    glMatrixMode(GL_MODELVIEW)\r\n    glPushMatrix()\r\n    glLoadIdentity()\r\n    glRasterPos2f(x, y)\r\n    for ch in text:\r\n        glutBitmapCharacter(font, ord(ch) & 0xFF)\r\n    glPopMatrix()\r\n    glMatrixMode(GL_PROJECTION)\r\n    glPopMatrix()\r\n    glMatrixMode(GL_MODELVIEW)\r\n\r\n\r\n# -------------------------------------------------\r\n# GRID + TREES\r\n# -------------------------------------------------\r\ndef draw_grid():\r\n    outer_tile = 80\r\n    for x in range(-GRID_LENGTH, GRID_LENGTH, outer_tile):\r\n        for y in range(-GRID_LENGTH, GRID_LENGTH, outer_tile):\r\n            ix = x // outer_tile + 1357\r\n            iy = y // outer_tile + 2467\r\n            v = ix * 374761393 + iy * 668265263\r\n            v ^= (v >> 13)\r\n            v &= 0xFF\r\n            noise = v / 255.0\r\n            grass_factor = 0.4 + 0.6 * noise\r\n            dirt_factor = 1.0 - grass_factor\r\n\r\n            r = 0.18 * dirt_factor + 0.08 * grass_factor\r\n            g = 0.10 * dirt_factor + 0.35 * grass_factor\r\n            b = 0.04 * dirt_factor + 0.05 * grass_factor\r\n\r\n            glColor3f(r, g, b)\r\n            glBegin(GL_QUADS)\r\n            glVertex3f(x, y, 0)\r\n            glVertex3f(x + outer_tile, y, 0)\r\n            glVertex3f(x + outer_tile, y + outer_tile, 0)\r\n            glVertex3f(x, y + outer_tile, 0)\r\n            glEnd()\r\n\r\n    for t in trees:\r\n        x, y, trunk_h, trunk_r, foliage_r, style = t\r\n        glPushMatrix()\r\n        glTranslatef(x, y, 0)\r\n\r\n        glColor3f(0.38, 0.24, 0.10)\r\n        glPushMatrix()\r\n        glTranslatef(0, 0, trunk_h * 0.5)\r\n        glScalef(trunk_r, trunk_r, trunk_h)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n\r\n        quad = gluNewQuadric()\r\n        if style == 0:\r\n            glColor3f(0.05, 0.35, 0.07)\r\n            glPushMatrix()\r\n            glTranslatef(0, 0, trunk_h + foliage_r * 0.7)\r\n            gluSphere(quad, foliage_r, 12, 12)\r\n            glPopMatrix()\r\n\r\n            glPushMatrix()\r\n            glTranslatef(foliage_r * 0.5, 0, trunk_h + foliage_r * 0.5)\r\n            gluSphere(quad, foliage_r * 0.6, 10, 10)\r\n            glPopMatrix()\r\n\r\n            glPushMatrix()\r\n            glTranslatef(-foliage_r * 0.4, foliage_r * 0.3,\r\n                         trunk_h + foliage_r * 0.8)\r\n            gluSphere(quad, foliage_r * 0.55, 10, 10)\r\n            glPopMatrix()\r\n        else:\r\n            glColor3f(0.04, 0.30, 0.05)\r\n            levels = 3\r\n            for i in range(levels):\r\n                factor = 1.0 - i * 0.25\r\n                r_level = foliage_r * factor\r\n                z = trunk_h + foliage_r * 0.4 + i * (foliage_r * 0.6)\r\n                glPushMatrix()\r\n                glTranslatef(0, 0, z)\r\n                gluSphere(quad, r_level, 10, 10)\r\n                glPopMatrix()\r\n\r\n        glPopMatrix()\r\n\r\n\r\n# -------------------------------------------------\r\n# WALLS\r\n# -------------------------------------------------\r\ndef draw_walls():\r\n    h = 10.0\r\n    glColor3f(0.25, 0.25, 0.27)\r\n\r\n    glBegin(GL_QUADS)\r\n    glVertex3f(-GRID_LENGTH, -GRID_LENGTH, 0)\r\n    glVertex3f(-GRID_LENGTH, GRID_LENGTH, 0)\r\n    glVertex3f(-GRID_LENGTH, GRID_LENGTH, h)\r\n    glVertex3f(-GRID_LENGTH, -GRID_LENGTH, h)\r\n    glEnd()\r\n\r\n    glBegin(GL_QUADS)\r\n    glVertex3f(GRID_LENGTH, -GRID_LENGTH, 0)\r\n    glVertex3f(GRID_LENGTH, GRID_LENGTH, 0)\r\n    glVertex3f(GRID_LENGTH, GRID_LENGTH, h)\r\n    glVertex3f(GRID_LENGTH, -GRID_LENGTH, h)\r\n    glEnd()\r\n\r\n    glBegin(GL_QUADS)\r\n    glVertex3f(-GRID_LENGTH, -GRID_LENGTH, 0)\r\n    glVertex3f(GRID_LENGTH, -GRID_LENGTH, 0)\r\n    glVertex3f(GRID_LENGTH, -GRID_LENGTH, h)\r\n    glVertex3f(-GRID_LENGTH, -GRID_LENGTH, h)\r\n    glEnd()\r\n\r\n    glBegin(GL_QUADS)\r\n    glVertex3f(-GRID_LENGTH, GRID_LENGTH, 0)\r\n    glVertex3f(GRID_LENGTH, GRID_LENGTH, 0)\r\n    glVertex3f(GRID_LENGTH, GRID_LENGTH, h)\r\n    glVertex3f(-GRID_LENGTH, GRID_LENGTH, h)\r\n    glEnd()\r\n\r\n\r\n# -------------------------------------------------\r\n# PLAYER WITH BOW\r\n# -------------------------------------------------\r\ndef draw_player():\r\n    glPushMatrix()\r\n    glTranslatef(px, py, 0)\r\n    glRotatef(g_angle, 0, 0, 1)\r\n\r\n    leg_h = 18.0\r\n    leg_th = 3.0\r\n    body_h = 22.0\r\n    body_w = 8.0\r\n    body_d = 10.0\r\n    head_r = 5.0\r\n\r\n    hip_z = leg_h\r\n    body_center_z = hip_z + body_h * 0.5\r\n    shoulder_z = hip_z + body_h * 0.85\r\n    neck_z = hip_z + body_h + head_r * 0.4\r\n    head_center_z = hip_z + body_h + head_r * 1.1\r\n\r\n    if not first_person:\r\n        glColor3f(0.15, 0.18, 0.25)\r\n        for side in (-1, 1):\r\n            glPushMatrix()\r\n            glTranslatef(0, side * 2.5, leg_h * 0.5)\r\n            glScalef(leg_th, leg_th, leg_h)\r\n            glutSolidCube(1)\r\n            glPopMatrix()\r\n\r\n        glColor3f(0.2, 0.35, 0.8)\r\n        glPushMatrix()\r\n        glTranslatef(0, 0, body_center_z)\r\n        glScalef(body_d, body_w, body_h)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n\r\n        glColor3f(1.0, 0.85, 0.7)\r\n        glPushMatrix()\r\n        glTranslatef(body_d * 0.05, 0, neck_z)\r\n        glScalef(2.5, 2.5, 4.0)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n\r\n        glPushMatrix()\r\n        glTranslatef(body_d * 0.05, 0, head_center_z)\r\n        glutSolidSphere(head_r, 24, 24)\r\n        glPopMatrix()\r\n\r\n        arm_len = 16.0\r\n        arm_th = 2.2\r\n        shoulder_y = body_w * 0.55\r\n\r\n        glPushMatrix()\r\n        glTranslatef(body_d * 0.4, shoulder_y, shoulder_z)\r\n        glRotatef(-10, 0, 1, 0)\r\n        glScalef(arm_len, arm_th, arm_th)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n\r\n        glPushMatrix()\r\n        glTranslatef(body_d * 0.1, -shoulder_y, shoulder_z)\r\n        glRotatef(-25, 0, 1, 0)\r\n        glScalef(arm_len * 0.9, arm_th, arm_th)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n\r\n        hand_r = 1.6\r\n        glPushMatrix()\r\n        glTranslatef(body_d * 0.4 + arm_len * 0.5, shoulder_y, shoulder_z)\r\n        glutSolidSphere(hand_r, 10, 10)\r\n        glPopMatrix()\r\n        glPushMatrix()\r\n        glTranslatef(body_d * 0.1 + arm_len * 0.45, -shoulder_y, shoulder_z)\r\n        glutSolidSphere(hand_r, 10, 10)\r\n        glPopMatrix()\r\n\r\n        bow_h = 20.0\r\n        bow_th = 0.7\r\n        bow_x = body_d * 0.4 + arm_len * 0.5\r\n        bow_y = shoulder_y\r\n        bow_z = shoulder_z\r\n\r\n        glPushMatrix()\r\n        glTranslatef(bow_x, bow_y, bow_z)\r\n\r\n        glColor3f(0.45, 0.26, 0.08)\r\n        glPushMatrix()\r\n        glScalef(bow_th, bow_th, bow_h)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n\r\n        tip_offset_z = bow_h * 0.5\r\n        glPushMatrix()\r\n        glTranslatef(0, 0, tip_offset_z)\r\n        glRotatef(20, 0, 1, 0)\r\n        glScalef(1.4, bow_th, 3.0)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n        glPushMatrix()\r\n        glTranslatef(0, 0, -tip_offset_z)\r\n        glRotatef(-20, 0, 1, 0)\r\n        glScalef(1.4, bow_th, 3.0)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n\r\n        glColor3f(0.9, 0.9, 0.9)\r\n        glPushMatrix()\r\n        glTranslatef(-1.0, 0, 0)\r\n        glScalef(bow_th * 0.2, bow_th * 0.2, bow_h * 0.95)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n\r\n        glPopMatrix()\r\n    else:\r\n        arm_len = 16.0\r\n        arm_th = 2.2\r\n        shoulder_y = body_w * 0.55\r\n\r\n        glTranslatef(0, 0, 5.0)\r\n\r\n        glColor3f(1.0, 0.85, 0.7)\r\n        glPushMatrix()\r\n        glTranslatef(body_d * 0.3, shoulder_y * 0.8, shoulder_z - 8)\r\n        glRotatef(-5, 0, 1, 0)\r\n        glScalef(arm_len * 0.9, arm_th, arm_th)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n\r\n        glPushMatrix()\r\n        glTranslatef(body_d * 0.1, -shoulder_y * 0.7, shoulder_z - 7)\r\n        glRotatef(-20, 0, 1, 0)\r\n        glScalef(arm_len * 0.8, arm_th, arm_th)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n\r\n        hand_r = 1.6\r\n        glPushMatrix()\r\n        glTranslatef(body_d * 0.3 + arm_len * 0.45,\r\n                     shoulder_y * 0.8,\r\n                     shoulder_z - 8)\r\n        glutSolidSphere(hand_r, 10, 10)\r\n        glPopMatrix()\r\n        glPushMatrix()\r\n        glTranslatef(body_d * 0.1 + arm_len * 0.4,\r\n                     -shoulder_y * 0.7,\r\n                     shoulder_z - 7)\r\n        glutSolidSphere(hand_r, 10, 10)\r\n        glPopMatrix()\r\n\r\n        bow_h = 20.0\r\n        bow_th = 0.7\r\n        bow_x = body_d * 0.3 + arm_len * 0.45\r\n        bow_y = shoulder_y * 0.8\r\n        bow_z = shoulder_z - 8\r\n\r\n        glPushMatrix()\r\n        glTranslatef(bow_x, bow_y, bow_z)\r\n\r\n        glColor3f(0.45, 0.26, 0.08)\r\n        glPushMatrix()\r\n        glScalef(bow_th, bow_th, bow_h)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n\r\n        tip_offset_z = bow_h * 0.5\r\n        glPushMatrix()\r\n        glTranslatef(0, 0, tip_offset_z)\r\n        glRotatef(20, 0, 1, 0)\r\n        glScalef(1.4, bow_th, 3.0)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n        glPushMatrix()\r\n        glTranslatef(0, 0, -tip_offset_z)\r\n        glRotatef(-20, 0, 1, 0)\r\n        glScalef(1.4, bow_th, 3.0)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n\r\n        glColor3f(0.9, 0.9, 0.9)\r\n        glPushMatrix()\r\n        glTranslatef(-1.0, 0, 0)\r\n        glScalef(bow_th * 0.2, bow_th * 0.2, bow_h * 0.95)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n\r\n        glPopMatrix()\r\n\r\n    glPopMatrix()\r\n\r\n\r\n# -------------------------------------------------\r\n# ENVIRONMENT / POWERUPS\r\n# -------------------------------------------------\r\ndef draw_collectables():\r\n    for cx, cy, c_type in collectables:\r\n        glPushMatrix()\r\n        glTranslatef(cx, cy, 8.0)\r\n\r\n        glColor3f(0.9, 0.7, 0.1)\r\n        glPushMatrix()\r\n        glRotatef(90, 0, 0, 1)\r\n        glScalef(8.0, 0.25, 0.25)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n\r\n        glColor3f(0.95, 0.95, 0.95)\r\n        glPushMatrix()\r\n        glTranslatef(4.5, 0, 0)\r\n        glScalef(1.0, 0.5, 0.5)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n\r\n        glPopMatrix()\r\n\r\n\r\ndef draw_powerups():\r\n    for pw_x, pw_y, pw_type, spawn_time in powerups:\r\n        bob = math.sin(frame * 0.1) * 3\r\n        glPushMatrix()\r\n        glTranslatef(pw_x, pw_y, 15.0 + bob)\r\n        glRotatef(frame * 2, 0, 0, 1)\r\n\r\n        if pw_type == 0:\r\n            glColor3f(0.2, 0.5, 1.0)\r\n            glutSolidCube(10)\r\n        elif pw_type == 1:\r\n            glColor3f(1.0, 0.9, 0.2)\r\n            glutSolidSphere(6, 12, 12)\r\n        elif pw_type == 2:\r\n            glColor3f(1.0, 0.3, 0.1)\r\n            glBegin(GL_TRIANGLES)\r\n            glVertex3f(0, 8, 0)\r\n            glVertex3f(-7, -4, 0)\r\n            glVertex3f(7, -4, 0)\r\n            glEnd()\r\n            glBegin(GL_TRIANGLES)\r\n            glVertex3f(0, -8, 0)\r\n            glVertex3f(-7, 4, 0)\r\n            glVertex3f(7, 4, 0)\r\n            glEnd()\r\n\r\n        glPopMatrix()\r\n\r\n\r\ndef draw_environment():\r\n    for rx, ry, rad in rocks:\r\n        glPushMatrix()\r\n        glTranslatef(rx, ry, rad * 0.5)\r\n        glColor3f(0.4, 0.35, 0.3)\r\n        glScalef(rad, rad, rad)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n\r\n    for wx, wy, rad in water_patches:\r\n        glColor3f(0.2, 0.4, 0.7)\r\n        glBegin(GL_QUADS)\r\n        glVertex3f(wx - rad, wy - rad, 0.5)\r\n        glVertex3f(wx + rad, wy - rad, 0.5)\r\n        glVertex3f(wx + rad, wy + rad, 0.5)\r\n        glVertex3f(wx - rad, wy + rad, 0.5)\r\n        glEnd()\r\n\r\n    for bx, by, rad in bushes:\r\n        glPushMatrix()\r\n        glTranslatef(bx, by, rad * 0.4)\r\n        glColor3f(0.15, 0.4, 0.15)\r\n        glutSolidSphere(rad * 0.6, 8, 8)\r\n        glPopMatrix()\r\n\r\n\r\ndef draw_particles():\r\n    glPointSize(5)\r\n    glBegin(GL_POINTS)\r\n    for p in particles:\r\n        px, py, pz, vx, vy, vz, r, g, b, life = p\r\n        alpha = life / 40.0\r\n        glColor3f(r * alpha, g * alpha, b * alpha)\r\n        glVertex3f(px, py, pz)\r\n    glEnd()\r\n\r\n\r\ndef draw_shield_effect():\r\n    if active_shield > 0:\r\n        glPushMatrix()\r\n        glTranslatef(px, py, 20)\r\n        glEnable(GL_BLEND)\r\n        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)\r\n        pulse = 0.3 + 0.2 * math.sin(frame * 0.2)\r\n        glColor4f(0.2, 0.5, 1.0, pulse)\r\n        glutSolidSphere(30, 16, 16)\r\n        glDisable(GL_BLEND)\r\n        glPopMatrix()\r\n\r\n\r\ndef draw_boss_healthbar():\r\n    if boss_animal and boss_health > 0:\r\n        glMatrixMode(GL_PROJECTION)\r\n        glPushMatrix()\r\n        glLoadIdentity()\r\n        gluOrtho2D(0, 1000, 0, 800)\r\n        glMatrixMode(GL_MODELVIEW)\r\n        glPushMatrix()\r\n        glLoadIdentity()\r\n\r\n        bar_width = 300\r\n        bar_height = 20\r\n        bar_x = 350\r\n        bar_y = 750\r\n\r\n        glColor3f(0.3, 0.1, 0.1)\r\n        glBegin(GL_QUADS)\r\n        glVertex2f(bar_x, bar_y)\r\n        glVertex2f(bar_x + bar_width, bar_y)\r\n        glVertex2f(bar_x + bar_width, bar_y + bar_height)\r\n        glVertex2f(bar_x, bar_y + bar_height)\r\n        glEnd()\r\n\r\n        health_width = (boss_health / MAX_BOSS_HEALTH) * bar_width\r\n        glColor3f(0.9, 0.1, 0.1)\r\n        glBegin(GL_QUADS)\r\n        glVertex2f(bar_x, bar_y)\r\n        glVertex2f(bar_x + health_width, bar_y)\r\n        glVertex2f(bar_x + health_width, bar_y + bar_height)\r\n        glVertex2f(bar_x, bar_y + bar_height)\r\n        glEnd()\r\n\r\n        glColor3f(1, 1, 1)\r\n        glBegin(GL_LINE_LOOP)\r\n        glVertex2f(bar_x, bar_y)\r\n        glVertex2f(bar_x + bar_width, bar_y)\r\n        glVertex2f(bar_x + bar_width, bar_y + bar_height)\r\n        glVertex2f(bar_x, bar_y + bar_height)\r\n        glEnd()\r\n\r\n        glPopMatrix()\r\n        glMatrixMode(GL_PROJECTION)\r\n        glPopMatrix()\r\n        glMatrixMode(GL_MODELVIEW)\r\n\r\n\r\n# -------------------------------------------------\r\n# ARROW DRAWING\r\n# -------------------------------------------------\r\ndef draw_bullets():\r\n    for arrow_data in arrows:\r\n        ax, ay, ang = arrow_data[0], arrow_data[1], arrow_data[2]\r\n        arr_type = arrow_data[3] if len(arrow_data) > 3 else 0\r\n\r\n        glPushMatrix()\r\n        glTranslatef(ax, ay, 18.0)\r\n        glRotatef(ang, 0, 0, 1)\r\n\r\n        if arr_type == 1:\r\n            glColor3f(1.0, 0.3, 0.1)\r\n        elif arr_type == 2:\r\n            glColor3f(0.3, 0.7, 1.0)\r\n        else:\r\n            glColor3f(0.6, 0.4, 0.1)\r\n\r\n        glPushMatrix()\r\n        glTranslatef(6.0, 0, 0)\r\n        glScalef(12.0, 0.3, 0.3)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n\r\n        glColor3f(0.85, 0.85, 0.85)\r\n        glPushMatrix()\r\n        glTranslatef(12.5, 0, 0)\r\n        glScalef(1.4, 0.6, 0.6)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n\r\n        if arr_type == 1:\r\n            glColor3f(1.0, 0.5, 0.1)\r\n        elif arr_type == 2:\r\n            glColor3f(0.5, 0.9, 1.0)\r\n        else:\r\n            glColor3f(0.9, 0.1, 0.1)\r\n\r\n        glPushMatrix()\r\n        glTranslatef(0.0, 0.0, 0.5)\r\n        glScalef(1.2, 1.8, 0.12)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n        glPushMatrix()\r\n        glTranslatef(0.0, 0.0, -0.5)\r\n        glScalef(1.2, 1.8, 0.12)\r\n        glutSolidCube(1)\r\n        glPopMatrix()\r\n\r\n        glPopMatrix()\r\n\r\n\r\n# -------------------------------------------------\r\n# DRAW ANIMALS\r\n# -------------------------------------------------\r\ndef draw_enemies():\r\n    for a in animals:\r\n        t_type, x, y, angle, speed, phase = a\r\n        glPushMatrix()\r\n        glTranslatef(x, y, 0)\r\n        glRotatef(angle, 0, 0, 1)\r\n\r\n        if t_type in (0, 3, 4):\r\n            if t_type == 0:\r\n                base_col = (0.9, 0.55, 0.15)\r\n            elif t_type == 4:\r\n                base_col = (0.85, 0.65, 0.25)\r\n            else:\r\n                base_col = (0.4, 0.25, 0.1)\r\n\r\n            if t_type == 0:\r\n                accent_col = (0.75, 0.45, 0.15)\r\n                body_len, body_w, body_h = 32.0, 14.0, 12.0\r\n                leg_h, leg_t = 9.0, 4.0\r\n                stripes = True\r\n                mane = False\r\n            elif t_type == 4:\r\n                accent_col = (0.75, 0.5, 0.2)\r\n                body_len, body_w, body_h = 34.0, 15.0, 13.0\r\n                leg_h, leg_t = 9.5, 4.2\r\n                stripes = False\r\n                mane = True\r\n            else:\r\n                accent_col = (0.35, 0.2, 0.09)\r\n                body_len, body_w, body_h = 28.0, 16.0, 14.0\r\n                leg_h, leg_t = 8.0, 5.0\r\n                stripes = False\r\n                mane = False\r\n\r\n            body_bob = math.sin(phase * 1.2) * 0.6\r\n\r\n            glColor3f(*base_col)\r\n            glPushMatrix()\r\n            glTranslatef(0, 0, leg_h + body_h / 2.0 + body_bob)\r\n            glScalef(body_len, body_w, body_h)\r\n            glutSolidCube(1)\r\n            glPopMatrix()\r\n\r\n            if t_type == 3:\r\n                glColor3f(*base_col)\r\n                glPushMatrix()\r\n                glTranslatef(0, 0, leg_h + body_h * 0.75 + body_bob)\r\n                glutSolidSphere(body_h * 0.7, 16, 16)\r\n                glPopMatrix()\r\n\r\n            leg_positions = [\r\n                (+body_len * 0.3, +body_w * 0.33, 0.0),\r\n                (+body_len * 0.3, -body_w * 0.33, math.pi),\r\n                (-body_len * 0.3, +body_w * 0.33, math.pi),\r\n                (-body_len * 0.3, -body_w * 0.33, 0.0),\r\n            ]\r\n            glColor3f(*accent_col)\r\n            for lx, ly, shift in leg_positions:\r\n                lift = math.sin(phase * 1.4 + shift) * 1.2\r\n                glPushMatrix()\r\n                glTranslatef(lx, ly, leg_h / 2.0 + lift)\r\n                glScalef(leg_t, leg_t, leg_h)\r\n                glutSolidCube(1)\r\n                glPopMatrix()\r\n\r\n            head_len = body_len * 0.35\r\n            head_w = body_w * 0.8\r\n            head_h = body_h * (1.1 if t_type != 3 else 0.9)\r\n\r\n            glColor3f(*base_col)\r\n            glPushMatrix()\r\n            glTranslatef(body_len * 0.6,\r\n                         0,\r\n                         leg_h + body_h + head_h * 0.2 + body_bob)\r\n            glScalef(head_len, head_w, head_h)\r\n            glutSolidCube(1)\r\n            glPopMatrix()\r\n\r\n            glPushMatrix()\r\n            glTranslatef(body_len * 0.6 + head_len * 0.55,\r\n                         0,\r\n                         leg_h + body_h + head_h * 0.0 + body_bob)\r\n            glScalef(head_len * 0.5, head_w * 0.6, head_h * 0.6)\r\n            glutSolidCube(1)\r\n            glPopMatrix()\r\n\r\n            ear_size = 3.0\r\n            ear_z = leg_h + body_h + head_h * 0.8 + body_bob\r\n            glColor3f(0.2, 0.1, 0.05)\r\n            glPushMatrix()\r\n            glTranslatef(body_len * 0.5, head_w * 0.35, ear_z)\r\n            glScalef(ear_size, ear_size, ear_size)\r\n            glutSolidCube(1)\r\n            glPopMatrix()\r\n            glPushMatrix()\r\n            glTranslatef(body_len * 0.5, -head_w * 0.35, ear_z)\r\n            glScalef(ear_size, ear_size, ear_size)\r\n            glutSolidCube(1)\r\n            glPopMatrix()\r\n\r\n            glColor3f(*base_col)\r\n            glPushMatrix()\r\n            glTranslatef(-body_len * 0.6, 0,\r\n                         leg_h + body_h * 0.7 + body_bob)\r\n            glRotatef(20 * math.sin(phase * 1.5), 0, 1, 0)\r\n            glScalef(body_len * 0.35, 2.0, 3.0)\r\n            glutSolidCube(1)\r\n            glPopMatrix()\r\n\r\n            if stripes:\r\n                glColor3f(0.05, 0.05, 0.05)\r\n                for sx in (-0.2, -0.05, 0.1, 0.25):\r\n                    glPushMatrix()\r\n                    glTranslatef(body_len * sx, 0,\r\n                                 leg_h + body_h * 0.9 + body_bob)\r\n                    glScalef(2.0, body_w * 1.05, 1.5)\r\n                    glutSolidCube(1)\r\n                    glPopMatrix()\r\n\r\n            if mane:\r\n                mane_col = (0.55, 0.35, 0.15)\r\n                glColor3f(*mane_col)\r\n                center_z = leg_h + body_h + head_h * 0.3 + body_bob\r\n                glPushMatrix()\r\n                glTranslatef(body_len * 0.6, 0, center_z)\r\n                glutSolidSphere(head_h * 0.9, 18, 18)\r\n                glPopMatrix()\r\n\r\n        elif t_type == 1:\r\n            body_len, body_w, body_h = 40.0, 24.0, 22.0\r\n            leg_h, leg_t = 16.0, 7.0\r\n            base_col = (0.6, 0.62, 0.65)\r\n            body_bob = math.sin(phase * 0.8) * 0.4\r\n\r\n            glColor3f(*base_col)\r\n            glPushMatrix()\r\n            glTranslatef(0, 0, leg_h + body_h / 2.0 + body_bob)\r\n            glScalef(body_len, body_w, body_h)\r\n            glutSolidCube(1)\r\n            glPopMatrix()\r\n\r\n            leg_positions = [\r\n                (+body_len * 0.25, +body_w * 0.35),\r\n                (+body_len * 0.25, -body_w * 0.35),\r\n                (-body_len * 0.25, +body_w * 0.35),\r\n                (-body_len * 0.25, -body_w * 0.35),\r\n            ]\r\n            glColor3f(0.55, 0.57, 0.60)\r\n            for lx, ly in leg_positions:\r\n                glPushMatrix()\r\n                glTranslatef(lx, ly, leg_h / 2.0)\r\n                glScalef(leg_t, leg_t, leg_h)\r\n                glutSolidCube(1)\r\n                glPopMatrix()\r\n\r\n            head_len, head_w, head_h = 18.0, 22.0, 20.0\r\n            glColor3f(*base_col)\r\n            glPushMatrix()\r\n            glTranslatef(body_len * 0.55,\r\n                         0,\r\n                         leg_h + body_h * 0.8 + body_bob)\r\n            glScalef(head_len, head_w, head_h)\r\n            glutSolidCube(1)\r\n            glPopMatrix()\r\n\r\n            ear_thick = 2.5\r\n            glColor3f(0.58, 0.6, 0.63)\r\n            glPushMatrix()\r\n            glTranslatef(body_len * 0.5,\r\n                         head_w * 0.6,\r\n                         leg_h + body_h * 0.8 + body_bob)\r\n            glScalef(head_len * 0.7, head_w * 0.7, ear_thick)\r\n            glutSolidCube(1)\r\n            glPopMatrix()\r\n            glPushMatrix()\r\n            glTranslatef(body_len * 0.5,\r\n                         -head_w * 0.6,\r\n                         leg_h + body_h * 0.8 + body_bob)\r\n            glScalef(head_len * 0.7, head_w * 0.7, ear_thick)\r\n            glutSolidCube(1)\r\n            glPopMatrix()\r\n\r\n            glColor3f(0.55, 0.57, 0.60)\r\n            glPushMatrix()\r\n            glTranslatef(body_len * 0.8,\r\n                         0,\r\n                         leg_h + body_h * 0.8 + body_bob)\r\n            glRotatef(-50, 0, 1, 0)\r\n            glScalef(18.0, 4.0, 4.0)\r\n            glutSolidCube(1)\r\n            glPopMatrix()\r\n            glPushMatrix()\r\n            glTranslatef(body_len * 1.0,\r\n                         0,\r\n                         leg_h + body_h * 0.3 + body_bob)\r\n            glRotatef(-85, 0, 1, 0)\r\n            glScalef(14.0, 4.0, 4.0)\r\n            glutSolidCube(1)\r\n            glPopMatrix()\r\n\r\n            glColor3f(0.95, 0.95, 0.9)\r\n            tusk_len = 10.0\r\n            tusk_t = 1.8\r\n            for side in (+1, -1):\r\n                glPushMatrix()\r\n                glTranslatef(body_len * 0.9,\r\n                             side * 4.0,\r\n                             leg_h + body_h * 0.45 + body_bob)\r\n                glRotatef(-20, 0, 1, 0)\r\n                glScalef(tusk_len, tusk_t, tusk_t)\r\n                glutSolidCube(1)\r\n                glPopMatrix()\r\n\r\n        elif t_type == 2:\r\n            segs = 14\r\n            spacing = 4.5\r\n            wave_amp = 2.5\r\n            wave_freq = 0.6\r\n\r\n            glColor3f(0.16, 0.4, 0.14)\r\n            for i in range(segs):\r\n                off_x = -i * spacing\r\n                off_y = math.sin(phase + i * wave_freq) * wave_amp\r\n                off_z = 1.5\r\n                glPushMatrix()\r\n                glTranslatef(off_x, off_y, off_z)\r\n                glScalef(4.0, 3.0, 3.0)\r\n                glutSolidSphere(1.0, 12, 12)\r\n                glPopMatrix()\r\n\r\n            glColor3f(0.18, 0.5, 0.18)\r\n            head_z = 2.0\r\n            glPushMatrix()\r\n            glTranslatef(2.0, 0, head_z)\r\n            glScalef(5.0, 4.0, 4.0)\r\n            glutSolidSphere(1.0, 14, 14)\r\n            glPopMatrix()\r\n\r\n            glColor3f(0, 0, 0)\r\n            eye_z = head_z + 1.0\r\n            eye_offset_y = 1.5\r\n            for side in (+1, -1):\r\n                glPushMatrix()\r\n                glTranslatef(3.8, side * eye_offset_y, eye_z)\r\n                glutSolidSphere(0.7, 8, 8)\r\n                glPopMatrix()\r\n\r\n        glPopMatrix()\r\n\r\n\r\n# -------------------------------------------------\r\n# INPUT\r\n# -------------------------------------------------\r\ndef keyboardListener(key, x, y):\r\n    global px, py, g_angle, first_person, game_over, paused, level, cheat_mode\r\n    global current_arrow_type, arrow_count\r\n\r\n    if key == b'r':\r\n        restart_game()\r\n        return\r\n\r\n    if key == b'p':\r\n        if not game_over:\r\n            paused = not paused\r\n        return\r\n\r\n    if game_over:\r\n        return\r\n\r\n    if key == b'c':\r\n        cheat_mode = not cheat_mode\r\n        return\r\n\r\n    if key == b'1':\r\n        current_arrow_type = 0\r\n        return\r\n    if key == b'2':\r\n        current_arrow_type = 1\r\n        return\r\n    if key == b'3':\r\n        current_arrow_type = 2\r\n        return\r\n\r\n    if paused and key in (b'w', b's', b'a', b'd'):\r\n        return\r\n\r\n    base_step = 10.0\r\n    step_increment = 1.0\r\n    step = base_step + (level - 1) * step_increment\r\n\r\n    if active_speed > 0:\r\n        step *= 1.5\r\n\r\n    rad = math.radians(g_angle)\r\n    dx = math.cos(rad) * step\r\n    dy = math.sin(rad) * step\r\n\r\n    limit = GRID_LENGTH - 40\r\n\r\n    if key == b'w':\r\n        nx = px + dx\r\n        ny = py + dy\r\n        if -limit < nx < limit and -limit < ny < limit and not position_blocked(nx, ny):\r\n            for wx, wy, wrad in water_patches:\r\n                if math.hypot(nx - wx, ny - wy) < wrad:\r\n                    nx = px + dx * 0.5\r\n                    ny = py + dy * 0.5\r\n                    break\r\n            px, py = nx, ny\r\n\r\n    if key == b's':\r\n        nx = px - dx\r\n        ny = py - dy\r\n        if -limit < nx < limit and -limit < ny < limit and not position_blocked(nx, ny):\r\n            for wx, wy, wrad in water_patches:\r\n                if math.hypot(nx - wx, ny - wy) < wrad:\r\n                    nx = px - dx * 0.5\r\n                    ny = py - dy * 0.5\r\n                    break\r\n            px, py = nx, ny\r\n\r\n    if key == b'a':\r\n        g_angle = (g_angle + 5) % 360\r\n    if key == b'd':\r\n        g_angle = (g_angle - 5) % 360\r\n\r\n    if key == b'v':\r\n        first_person = not first_person\r\n\r\n\r\ndef specialKeyListener(key, x, y):\r\n    global camera_angle, camera_pos\r\n    if key == GLUT_KEY_LEFT:\r\n        camera_angle += 2\r\n    if key == GLUT_KEY_RIGHT:\r\n        camera_angle -= 2\r\n    if key == GLUT_KEY_UP:\r\n        camera_pos[2] += 10\r\n    if key == GLUT_KEY_DOWN:\r\n        camera_pos[2] -= 10\r\n\r\n\r\ndef mouseListener(button, state, x, y):\r\n    global arrows, paused, game_over, arrow_count, cheat_mode\r\n    global current_arrow_type\r\n\r\n    if state != GLUT_DOWN:\r\n        return\r\n\r\n    ui_x = x\r\n    ui_y = 800 - y\r\n\r\n    if (BTN_PLAY[0] <= ui_x <= BTN_PLAY[2] and\r\n            BTN_PLAY[1] <= ui_y <= BTN_PLAY[3]):\r\n        if not game_over:\r\n            paused = not paused\r\n        return\r\n\r\n    if (BTN_RESTART[0] <= ui_x <= BTN_RESTART[2] and\r\n            BTN_RESTART[1] <= ui_y <= BTN_RESTART[3]):\r\n        restart_game()\r\n        return\r\n\r\n    if game_over or paused:\r\n        return\r\n\r\n    if button == GLUT_RIGHT_BUTTON:\r\n        return\r\n\r\n    if button == GLUT_LEFT_BUTTON:\r\n        if arrow_count <= 0 and not cheat_mode:\r\n            return\r\n        if not cheat_mode:\r\n            arrow_count -= 1\r\n\r\n        shoot_angle = g_angle  # no auto-aim in cheat mode\r\n        rad = math.radians(shoot_angle)\r\n        start_x = px + math.cos(rad) * 15.0\r\n        start_y = py + math.sin(rad) * 15.0\r\n\r\n        if active_multishot > 0:\r\n            for offset in [-15, 0, 15]:\r\n                angle_with_offset = shoot_angle + offset\r\n                rad_offset = math.radians(angle_with_offset)\r\n                sx = px + math.cos(rad_offset) * 15.0\r\n                sy = py + math.sin(rad_offset) * 15.0\r\n                arrows.append([sx, sy, angle_with_offset, current_arrow_type])\r\n        else:\r\n            arrows.append([start_x, start_y, shoot_angle, current_arrow_type])\r\n\r\n\r\n# -------------------------------------------------\r\n# RESTART\r\n# -------------------------------------------------\r\ndef restart_game():\r\n    global px, py, g_angle, player_health, score, level, next_level_score\r\n    global arrows, animals, game_over, paused, arrow_count, collectables, cheat_mode\r\n    global powerups, active_shield, active_speed, active_multishot\r\n    global current_arrow_type, frozen_animals, combo_count, combo_timer, score_multiplier\r\n    global boss_animal, boss_health, boss_spawned_level\r\n    global rocks, water_patches, bushes, particles\r\n    global stamina, sprinting, time_of_day\r\n\r\n    px, py = 0, -ARENA_SIZE + 80\r\n    g_angle = 90\r\n    player_health = 100\r\n    score = 0\r\n    level = 1\r\n    next_level_score = 20\r\n    arrow_count = max_arrows\r\n    game_over = False\r\n    paused = False\r\n    cheat_mode = False\r\n\r\n    current_arrow_type = 0\r\n    active_shield = 0\r\n    active_speed = 0\r\n    active_multishot = 0\r\n    combo_count = 0\r\n    combo_timer = 0\r\n    score_multiplier = 1\r\n    boss_animal = None\r\n    boss_health = 0\r\n    boss_spawned_level = 0\r\n    stamina = max_stamina\r\n    sprinting = False\r\n    time_of_day = 0\r\n\r\n    arrows.clear()\r\n    animals.clear()\r\n    collectables.clear()\r\n    powerups.clear()\r\n    frozen_animals.clear()\r\n    particles.clear()\r\n    rocks.clear()\r\n    water_patches.clear()\r\n    bushes.clear()\r\n\r\n    spawn_level_collectables()\r\n    spawn_environment()\r\n\r\n    for t_type in range(len(ANIMAL_TYPES)):\r\n        for _ in range(ANIMALS_PER_TYPE):\r\n            x = random.randint(-GRID_LENGTH + WORLD_SPAWN_MARGIN,\r\n                               GRID_LENGTH - WORLD_SPAWN_MARGIN)\r\n            y = random.randint(-GRID_LENGTH + WORLD_SPAWN_MARGIN,\r\n                               GRID_LENGTH - WORLD_SPAWN_MARGIN)\r\n            angle = random.uniform(0, 360)\r\n            if t_type == 1:\r\n                speed = random.uniform(0.08, 0.14)\r\n            elif t_type == 2:\r\n                speed = random.uniform(0.18, 0.26)\r\n            else:\r\n                speed = random.uniform(0.12, 0.22)\r\n            phase = random.uniform(0, 2 * math.pi)\r\n            animals.append([t_type, x, y, angle, speed, phase])\r\n\r\n\r\n# -------------------------------------------------\r\n# CAMERA\r\n# -------------------------------------------------\r\ndef setupCamera():\r\n    glMatrixMode(GL_PROJECTION)\r\n    glLoadIdentity()\r\n    gluPerspective(fovY, 1.25, 0.1, 3000)\r\n    glMatrixMode(GL_MODELVIEW)\r\n    glLoadIdentity()\r\n\r\n    if first_person:\r\n        rad = math.radians(g_angle)\r\n        look_dx = math.cos(rad)\r\n        look_dy = math.sin(rad)\r\n\r\n        eye_x = px\r\n        eye_y = py\r\n        eye_z = 30.0\r\n        center_x = px + look_dx * 50\r\n        center_y = py + look_dy * 50\r\n        center_z = 30.0\r\n\r\n        gluLookAt(eye_x, eye_y, eye_z,\r\n                  center_x, center_y, center_z,\r\n                  0, 0, 1)\r\n    else:\r\n        radius = 350\r\n        x = math.cos(math.radians(camera_angle)) * radius\r\n        y = math.sin(math.radians(camera_angle)) * radius\r\n        gluLookAt(x, y, camera_pos[2],\r\n                  0, 0, 40,\r\n                  0, 0, 1)\r\n\r\n\r\n# -------------------------------------------------\r\n# IDLE\r\n# -------------------------------------------------\r\ndef idle():\r\n    global frame, animals, arrows, player_health, score, game_over\r\n    global level, next_level_score, collectables, arrow_count\r\n    global active_shield, active_speed, active_multishot, powerups\r\n    global combo_count, combo_timer, score_multiplier, frozen_animals\r\n    global boss_animal, boss_health, boss_spawned_level, particles, time_of_day\r\n\r\n    if paused or game_over:\r\n        glutPostRedisplay()\r\n        return\r\n\r\n    frame += 1\r\n    time_of_day = (time_of_day + 0.2) % 360\r\n\r\n    if active_shield > 0:\r\n        active_shield -= 1\r\n    if active_speed > 0:\r\n        active_speed -= 1\r\n    if active_multishot > 0:\r\n        active_multishot -= 1\r\n\r\n    if combo_timer > 0:\r\n        combo_timer -= 1\r\n        if combo_timer == 0:\r\n            combo_count = 0\r\n            score_multiplier = 1\r\n\r\n    for p in particles[:]:\r\n        p[0] += p[3]\r\n        p[1] += p[4]\r\n        p[2] += p[5]\r\n        p[5] -= 0.1\r\n        p[9] -= 1\r\n        if p[9] <= 0 or p[2] < 0:\r\n            particles.remove(p)\r\n\r\n    if frame % 600 == 0 and random.random() < 0.3:\r\n        spawn_powerup()\r\n\r\n    for pw in powerups[:]:\r\n        if frame - pw[3] > 1800:\r\n            powerups.remove(pw)\r\n\r\n    # Spawn boss once per multiple-of-5 level\r\n    if level % 5 == 0 and boss_animal is None and boss_spawned_level != level:\r\n        spawn_boss()\r\n\r\n    if arrow_count <= 0 and not cheat_mode:\r\n        game_over = True\r\n        glutPostRedisplay()\r\n        return\r\n\r\n    for rx, ry, rrad in rocks:\r\n        if math.hypot(px - rx, py - ry) < rrad + 10:\r\n            if active_shield <= 0 and not cheat_mode:\r\n                player_health = 0\r\n                game_over = True\r\n\r\n    # Arrow collectables\r\n    for col in collectables[:]:\r\n        cx, cy, c_type = col\r\n        dx = px - cx\r\n        dy = py - cy\r\n        if dx * dx + dy * dy < 30 * 30:\r\n            collectables.remove(col)\r\n            arrow_count = min(arrow_count + 2, 100 if cheat_mode else max_arrows)\r\n            create_particles(cx, cy, 8, (0.9, 0.7, 0.1), 5)\r\n\r\n    # Powerups\r\n    for pw in powerups[:]:\r\n        pw_x, pw_y, pw_type, _ = pw\r\n        if math.hypot(px - pw_x, py - pw_y) < 30:\r\n            powerups.remove(pw)\r\n            if pw_type == 0:\r\n                active_shield = POWERUP_DURATION\r\n            elif pw_type == 1:\r\n                active_speed = POWERUP_DURATION\r\n            elif pw_type == 2:\r\n                active_multishot = POWERUP_DURATION\r\n            create_particles(pw_x, pw_y, 15, (1, 1, 0), 15)\r\n\r\n    # Move arrows\r\n    for arr in arrows[:]:\r\n        arr_type = arr[3] if len(arr) > 3 else 0\r\n        ax, ay, ang = arr[0], arr[1], arr[2]\r\n        rad = math.radians(ang)\r\n        ax += math.cos(rad) * arrow_speed\r\n        ay += math.sin(rad) * arrow_speed\r\n        arr[0] = ax\r\n        arr[1] = ay\r\n        if abs(ax) > GRID_LENGTH or abs(ay) > GRID_LENGTH:\r\n            arrows.remove(arr)\r\n\r\n    for idx in list(frozen_animals.keys()):\r\n        frozen_animals[idx] -= 1\r\n        if frozen_animals[idx] <= 0:\r\n            del frozen_animals[idx]\r\n\r\n    # Arrows vs animals\r\n    for arr in arrows[:]:\r\n        ax, ay, ang = arr[0], arr[1], arr[2]\r\n        arr_type = arr[3] if len(arr) > 3 else 0\r\n        hit = False\r\n\r\n        for i, a in enumerate(animals):\r\n            t_type, x, y, angle, speed, phase = a\r\n            dx = ax - x\r\n            dy = ay - y\r\n            dist2 = dx * dx + dy * dy\r\n\r\n            if t_type == 2:\r\n                r2 = 25 * 25\r\n            elif t_type == 1:\r\n                r2 = 40 * 40\r\n            else:\r\n                r2 = 35 * 35\r\n\r\n            if dist2 < r2:\r\n                arrows.remove(arr)\r\n                combo_timer = COMBO_TIMEOUT\r\n                combo_count += 1\r\n                if combo_count >= 10:\r\n                    score_multiplier = 5\r\n                elif combo_count >= 5:\r\n                    score_multiplier = 3\r\n                elif combo_count >= 3:\r\n                    score_multiplier = 2\r\n                else:\r\n                    score_multiplier = 1\r\n\r\n                points = 1 * score_multiplier\r\n                if arr_type == 1:\r\n                    points *= 2\r\n                score += points\r\n\r\n                if arr_type == 2:\r\n                    frozen_animals[i] = 180\r\n\r\n                color = (0.8, 0.1, 0.1)\r\n                if arr_type == 1:\r\n                    color = (1.0, 0.5, 0.1)\r\n                elif arr_type == 2:\r\n                    color = (0.3, 0.7, 1.0)\r\n                create_particles(x, y, 15, color, 20)\r\n\r\n                old_level = level\r\n                while score >= next_level_score:\r\n                    level += 1\r\n                    next_level_score += 10\r\n\r\n                if level > old_level:\r\n                    spawn_level_collectables()\r\n\r\n                x_new = random.randint(-GRID_LENGTH + WORLD_SPAWN_MARGIN,\r\n                                       GRID_LENGTH - WORLD_SPAWN_MARGIN)\r\n                y_new = random.randint(-GRID_LENGTH + WORLD_SPAWN_MARGIN,\r\n                                       GRID_LENGTH - WORLD_SPAWN_MARGIN)\r\n                a[1] = x_new\r\n                a[2] = y_new\r\n                a[3] = random.uniform(0, 360)\r\n                a[5] = random.uniform(0, 2 * math.pi)\r\n                hit = True\r\n                break\r\n        if hit:\r\n            continue\r\n\r\n    # Boss hits\r\n    if boss_animal:\r\n        for arr in arrows[:]:\r\n            ax, ay = arr[0], arr[1]\r\n            bx, by = boss_animal[1], boss_animal[2]\r\n            if math.hypot(ax - bx, ay - by) < 80:\r\n                arrows.remove(arr)\r\n                boss_health -= 1\r\n                boss_animal[6] = boss_health\r\n                create_particles(bx, by, 30, (1, 0, 0), 30)\r\n                if boss_health <= 0:\r\n                    score += 50\r\n                    boss_animal = None\r\n                break\r\n\r\n    max_r = GRID_LENGTH - 80\r\n    CHASE_RADIUS = 260.0\r\n    CHASE_MULTIPLIER = 2.0\r\n\r\n    player_hidden = False\r\n    for bx, by, brad in bushes:\r\n        if math.hypot(px - bx, py - by) < brad:\r\n            player_hidden = True\r\n            break\r\n\r\n    for i, a in enumerate(animals):\r\n        t_type, x, y, angle, speed, phase = a\r\n\r\n        if i in frozen_animals:\r\n            a[5] += 0.02\r\n            continue\r\n\r\n        dxp = px - x\r\n        dyp = py - y\r\n        distp = math.hypot(dxp, dyp)\r\n\r\n        is_chasing = (not cheat_mode) and (distp < CHASE_RADIUS) and (not player_hidden)\r\n        if is_chasing:\r\n            angle = math.degrees(math.atan2(dyp, dxp))\r\n\r\n        move_speed = speed * (CHASE_MULTIPLIER if is_chasing else 1.0)\r\n        rad = math.radians(angle)\r\n        x += math.cos(rad) * move_speed\r\n        y += math.sin(rad) * move_speed\r\n\r\n        bounced = False\r\n        if x < -max_r or x > max_r:\r\n            angle = (180 - angle) % 360\r\n            x = max(-max_r, min(max_r, x))\r\n            bounced = True\r\n        if y < -max_r or y > max_r:\r\n            angle = (-angle) % 360\r\n            y = max(-max_r, min(max_r, y))\r\n            bounced = True\r\n        if (not bounced) and (not is_chasing) and random.random() < 0.01:\r\n            angle += random.uniform(-40, 40)\r\n\r\n        phase += 0.08\r\n        a[1] = x\r\n        a[2] = y\r\n        a[3] = angle\r\n        a[5] = phase\r\n\r\n        if not game_over and player_health > 0 and not cheat_mode:\r\n            dxp2 = px - x\r\n            dyp2 = py - y\r\n            dist2p = dxp2 * dxp2 + dyp2 * dyp2\r\n\r\n            if t_type == 1:\r\n                touch_r2 = 45 * 45\r\n            elif t_type == 2:\r\n                touch_r2 = 28 * 28\r\n            else:\r\n                touch_r2 = 35 * 35\r\n\r\n            if dist2p < touch_r2:\r\n                if active_shield <= 0:\r\n                    player_health = 0\r\n                    game_over = True\r\n                else:\r\n                    create_particles(px, py, 20, (0.2, 0.5, 1.0), 10)\r\n\r\n    if boss_animal:\r\n        b_angle = boss_animal[3]\r\n        b_speed = boss_animal[4]\r\n        bx, by = boss_animal[1], boss_animal[2]\r\n\r\n        dbx = px - bx\r\n        dby = py - by\r\n        b_angle = math.degrees(math.atan2(dby, dbx))\r\n\r\n        rad = math.radians(b_angle)\r\n        bx += math.cos(rad) * b_speed * 1.5\r\n        by += math.sin(rad) * b_speed * 1.5\r\n\r\n        boss_animal[1] = bx\r\n        boss_animal[2] = by\r\n        boss_animal[3] = b_angle\r\n        boss_animal[5] += 0.08\r\n\r\n        if math.hypot(px - bx, py - by) < 60 and active_shield <= 0 and not cheat_mode:\r\n            player_health = 0\r\n            game_over = True\r\n\r\n    glutPostRedisplay()\r\n\r\n\r\n# -------------------------------------------------\r\n# DISPLAY\r\n# -------------------------------------------------\r\ndef showScreen():\r\n    time_factor = math.sin(math.radians(time_of_day))\r\n    if time_factor > 0:\r\n        sky_r = 0.55\r\n        sky_g = 0.78 - 0.3 * (1 - time_factor)\r\n        sky_b = 0.98\r\n    else:\r\n        sky_r = 0.05\r\n        sky_g = 0.05 + 0.1 * (1 + time_factor)\r\n        sky_b = 0.15\r\n    glClearColor(sky_r, sky_g, sky_b, 1.0)\r\n\r\n    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)\r\n    glLoadIdentity()\r\n    glViewport(0, 0, 1000, 800)\r\n    setupCamera()\r\n\r\n    draw_environment()\r\n    draw_grid()\r\n    draw_walls()\r\n    draw_powerups()\r\n    draw_collectables()\r\n    draw_player()\r\n    draw_bullets()\r\n    draw_enemies()\r\n    draw_particles()\r\n    draw_shield_effect()\r\n\r\n    # Boss as scaled-up animal\r\n    if boss_animal:\r\n        b_type, bx, by, b_angle, b_speed, b_phase, b_hp = boss_animal\r\n        glPushMatrix()\r\n        glTranslatef(bx, by, 0)\r\n        glRotatef(b_angle, 0, 0, 1)\r\n        glScalef(3, 3, 3)\r\n\r\n        tmp_animals = animals[:]\r\n        animals.clear()\r\n        animals.append([b_type, 0, 0, 0, b_speed, b_phase])\r\n        draw_enemies()\r\n        animals.clear()\r\n        animals.extend(tmp_animals)\r\n\r\n        glPopMatrix()\r\n        draw_boss_healthbar()\r\n\r\n    draw_text(10, 770, f\"<3 - {player_health}\")\r\n    draw_text(10, 740, f\"Points: {score}\")\r\n    draw_text(10, 710, f\"Level: {level}\")\r\n\r\n    if combo_count > 0:\r\n        combo_color = \"\"\r\n        if score_multiplier >= 5:\r\n            combo_color = \"ULTRA \"\r\n        elif score_multiplier >= 3:\r\n            combo_color = \"MEGA \"\r\n        elif score_multiplier >= 2:\r\n            combo_color = \"SUPER \"\r\n        draw_text(10, 620, f\"{combo_color}COMBO x{combo_count} ({score_multiplier}X)\")\r\n\r\n    if cheat_mode:\r\n        draw_text(10, 680, f\"Arrows: {arrow_count}\")\r\n    else:\r\n        draw_text(10, 680, f\"Arrows: {arrow_count}/{max_arrows}\")\r\n\r\n    arrow_names = [\"Normal\", \"Fire\", \"Ice\"]\r\n    draw_text(10, 650, f\"Arrow: {arrow_names[current_arrow_type]} (Keys 1-3)\")\r\n\r\n    y_pos = 590\r\n    if active_shield > 0:\r\n        draw_text(10, y_pos, f\"Shield: {active_shield // 60}s\")\r\n        y_pos -= 30\r\n    if active_speed > 0:\r\n        draw_text(10, y_pos, f\"Speed: {active_speed // 60}s\")\r\n        y_pos -= 30\r\n    if active_multishot > 0:\r\n        draw_text(10, y_pos, f\"Multi-Shot: {active_multishot // 60}s\")\r\n        y_pos -= 30\r\n\r\n    if cheat_mode:\r\n        draw_text(10, y_pos, \"CHEAT MODE: ON\")\r\n\r\n    if game_over:\r\n        if player_health <= 0:\r\n            draw_text(420, 400, \"GAME OVER\")\r\n        else:\r\n            draw_text(380, 400, \"OUT OF ARROWS!\")\r\n        draw_text(380, 360, f\"Final Score: {score}\")\r\n        draw_text(350, 320, \"Press R to Restart\")\r\n\r\n    # UI buttons\r\n    glMatrixMode(GL_PROJECTION)\r\n    glPushMatrix()\r\n    glLoadIdentity()\r\n    gluOrtho2D(0, 1000, 0, 800)\r\n    glMatrixMode(GL_MODELVIEW)\r\n    glPushMatrix()\r\n    glLoadIdentity()\r\n\r\n    glColor3f(1, 1, 1)\r\n\r\n    # Play/Pause button\r\n    glBegin(GL_LINE_LOOP)\r\n    glVertex2f(BTN_PLAY[0], BTN_PLAY[1])\r\n    glVertex2f(BTN_PLAY[2], BTN_PLAY[1])\r\n    glVertex2f(BTN_PLAY[2], BTN_PLAY[3])\r\n    glVertex2f(BTN_PLAY[0], BTN_PLAY[3])\r\n    glEnd()\r\n\r\n    cx = (BTN_PLAY[0] + BTN_PLAY[2]) / 2.0\r\n    cy = (BTN_PLAY[1] + BTN_PLAY[3]) / 2.0\r\n    size = (BTN_PLAY[2] - BTN_PLAY[0]) * 0.3\r\n\r\n    if paused or game_over:\r\n        glBegin(GL_TRIANGLES)\r\n        glVertex2f(cx - size * 0.4, cy - size)\r\n        glVertex2f(cx - size * 0.4, cy + size)\r\n        glVertex2f(cx + size, cy)\r\n        glEnd()\r\n    else:\r\n        bw = size * 0.4\r\n        bh = size\r\n        glBegin(GL_QUADS)\r\n        glVertex2f(cx - bw * 1.2, cy - bh)\r\n        glVertex2f(cx - bw * 0.2, cy - bh)\r\n        glVertex2f(cx - bw * 0.2, cy + bh)\r\n        glVertex2f(cx - bw * 1.2, cy + bh)\r\n\r\n        glVertex2f(cx + bw * 0.2, cy - bh)\r\n        glVertex2f(cx + bw * 1.2, cy - bh)\r\n        glVertex2f(cx + bw * 1.2, cy + bh)\r\n        glVertex2f(cx + bw * 0.2, cy + bh)\r\n        glEnd()\r\n\r\n    # Restart button\r\n    glBegin(GL_LINE_LOOP)\r\n    glVertex2f(BTN_RESTART[0], BTN_RESTART[1])\r\n    glVertex2f(BTN_RESTART[2], BTN_RESTART[1])\r\n    glVertex2f(BTN_RESTART[2], BTN_RESTART[3])\r\n    glVertex2f(BTN_RESTART[0], BTN_RESTART[3])\r\n    glEnd()\r\n\r\n    rcx = (BTN_RESTART[0] + BTN_RESTART[2]) / 2.0\r\n    rcy = (BTN_RESTART[1] + BTN_RESTART[3]) / 2.0\r\n    r = (BTN_RESTART[2] - BTN_RESTART[0]) * 0.35\r\n\r\n    glBegin(GL_LINE_STRIP)\r\n    segments = 18\r\n    for i in range(segments + 1):\r\n        ang = math.radians(230 - i * 260 / segments)\r\n        glVertex2f(rcx + r * math.cos(ang),\r\n                   rcy + r * math.sin(ang))\r\n    glEnd()\r\n\r\n    ah = math.radians(-20)\r\n    tip_x = rcx + r * math.cos(ah)\r\n    tip_y = rcy + r * math.sin(ah)\r\n    glBegin(GL_TRIANGLES)\r\n    glVertex2f(tip_x, tip_y)\r\n    glVertex2f(tip_x - 6, tip_y + 4)\r\n    glVertex2f(tip_x - 2, tip_y - 6)\r\n    glEnd()\r\n\r\n    glPopMatrix()\r\n    glMatrixMode(GL_PROJECTION)\r\n    glPopMatrix()\r\n    glMatrixMode(GL_MODELVIEW)\r\n\r\n    glutSwapBuffers()\r\n\r\n\r\n\r\ndef main():\r\n    spawn_environment()\r\n    spawn_level_collectables()\r\n\r\n    glutInit()\r\n    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH)\r\n    glutInitWindowSize(1000, 800)\r\n    glutInitWindowPosition(0, 0)\r\n    glutCreateWindow(b\"3D Arrow Arena - ULTIMATE EDITION\")\r\n    glEnable(GL_DEPTH_TEST)\r\n    glClearColor(0.55, 0.78, 0.98, 1.0)\r\n    glutDisplayFunc(showScreen)\r\n    glutKeyboardFunc(keyboardListener)\r\n    glutSpecialFunc(specialKeyListener)\r\n    glutMouseFunc(mouseListener)\r\n    glutIdleFunc(idle)\r\n    glutMainLoop()\r\n\r\n\r\nif __name__ == \"__main__\":\r\n    main()
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/Project.py b/Project.py
+--- a/Project.py	(revision d6c4f1838d82565bcad8d23814d446b782e0e428)
++++ b/Project.py	(date 1767046846593)
+@@ -21,11 +21,13 @@
+ player_health = 100
+ score = 0
+ level = 1
+-next_level_score = 20
++next_level_score = 30  # First level at 30, then increases by 40, 50, 60...
+ 
++# Arrow count system
+ max_arrows = 15
+ arrow_count = 15
+ 
++# Cheat mode
+ cheat_mode = False
+ 
+ game_over = False
+@@ -54,8 +56,8 @@
+ # Boss system
+ boss_animal = None  # [type, x, y, angle, speed, phase, health]
+ boss_health = 0
+-MAX_BOSS_HEALTH = 5
+-boss_spawned_level = 0
++MAX_BOSS_HEALTH = 12
++last_boss_type = -1  # Track the last boss type to avoid repetition
+ 
+ # Environment
+ rocks = []
+@@ -73,9 +75,10 @@
+ # Day/Night cycle
+ time_of_day = 0
+ 
+-# UI buttons
+-BTN_PLAY = [950, 750, 990, 790]
+-BTN_RESTART = [910, 750, 945, 785]
++# UI button rectangles (in 2D HUD coordinates: 0..1000 x, 0..800 y)
++# [left, bottom, right, top]
++BTN_PLAY = [950, 750, 990, 790]  # Top-right corner
++BTN_RESTART = [960, 740, 990, 770]  # Still used for click detection
+ 
+ # -------------------------------------------------
+ # FOREST / ARENA TREES
+@@ -144,7 +147,6 @@
+         phase = random.uniform(0, 2 * math.pi)
+         animals.append([t_type, x, y, angle, speed, phase])
+ 
+-
+ # -------------------------------------------------
+ # COLLECTABLES (ARROWS ONLY)
+ # -------------------------------------------------
+@@ -167,16 +169,33 @@
+ 
+ 
+ def spawn_boss():
+-    global boss_animal, boss_health, boss_spawned_level
+-    boss_type = random.randint(0, 4)
++    """Spawn a boss animal (different from last boss)"""
++    global boss_animal, boss_health, last_boss_type
++
++    # Choose a different animal type than the last boss
++    available_types = [0, 1, 2, 3, 4]  # tiger, elephant, snake, bear, lion
++    if last_boss_type != -1 and last_boss_type in available_types:
++        available_types.remove(last_boss_type)
++
++    boss_type = random.choice(available_types)
++    last_boss_type = boss_type
++
+     bx = random.randint(-GRID_LENGTH + 200, GRID_LENGTH - 200)
+     by = random.randint(-GRID_LENGTH + 200, GRID_LENGTH - 200)
+     angle = random.uniform(0, 360)
+-    speed = 0.15
++
++    # Boss speed = regular animal speed + 0.75
++    if boss_type == 1:  # Elephant
++        base_speed = random.uniform(0.08, 0.14)
++    elif boss_type == 2:  # Snake
++        base_speed = random.uniform(0.18, 0.26)
++    else:  # Tiger, Bear, Lion
++        base_speed = random.uniform(0.12, 0.22)
++    speed = base_speed + 0.75
++
+     phase = random.uniform(0, 2 * math.pi)
+     boss_health = MAX_BOSS_HEALTH
+     boss_animal = [boss_type, bx, by, angle, speed, phase, boss_health]
+-    boss_spawned_level = level
+ 
+ 
+ def spawn_environment():
+@@ -278,23 +297,22 @@
+         glutSolidCube(1)
+         glPopMatrix()
+ 
+-        quad = gluNewQuadric()
+         if style == 0:
+             glColor3f(0.05, 0.35, 0.07)
+             glPushMatrix()
+             glTranslatef(0, 0, trunk_h + foliage_r * 0.7)
+-            gluSphere(quad, foliage_r, 12, 12)
++            glutSolidSphere(foliage_r, 12, 12)
+             glPopMatrix()
+ 
+             glPushMatrix()
+             glTranslatef(foliage_r * 0.5, 0, trunk_h + foliage_r * 0.5)
+-            gluSphere(quad, foliage_r * 0.6, 10, 10)
++            glutSolidSphere(foliage_r * 0.6, 10, 10)
+             glPopMatrix()
+ 
+             glPushMatrix()
+             glTranslatef(-foliage_r * 0.4, foliage_r * 0.3,
+                          trunk_h + foliage_r * 0.8)
+-            gluSphere(quad, foliage_r * 0.55, 10, 10)
++            glutSolidSphere(foliage_r * 0.55, 10, 10)
+             glPopMatrix()
+         else:
+             glColor3f(0.04, 0.30, 0.05)
+@@ -305,7 +323,7 @@
+                 z = trunk_h + foliage_r * 0.4 + i * (foliage_r * 0.6)
+                 glPushMatrix()
+                 glTranslatef(0, 0, z)
+-                gluSphere(quad, r_level, 10, 10)
++                glutSolidSphere(r_level, 10, 10)
+                 glPopMatrix()
+ 
+         glPopMatrix()
+@@ -542,21 +560,33 @@
+ # ENVIRONMENT / POWERUPS
+ # -------------------------------------------------
+ def draw_collectables():
++    """Draw collectables as arrows matching the shootable arrows"""
+     for cx, cy, c_type in collectables:
+         glPushMatrix()
+         glTranslatef(cx, cy, 8.0)
++        glRotatef(45, 0, 0, 1)  # Slight rotation for visual effect
+ 
+-        glColor3f(0.9, 0.7, 0.1)
++        # Arrow shaft (wooden brown color)
++        glColor3f(0.55, 0.35, 0.2)
++        glPushMatrix()
++        glScalef(12.0, 1.5, 1.5)
++        glutSolidCube(1)
++        glPopMatrix()
++
++        # Arrow tip (metal silver color)
++        glColor3f(0.7, 0.7, 0.7)
+         glPushMatrix()
+-        glRotatef(90, 0, 0, 1)
+-        glScalef(8.0, 0.25, 0.25)
++        glTranslatef(7.0, 0, 0)
++        glRotatef(90, 0, 1, 0)
++        glScalef(2.0, 2.0, 2.0)
+         glutSolidCube(1)
+         glPopMatrix()
+ 
+-        glColor3f(0.95, 0.95, 0.95)
++        # Fletching (red feathers)
++        glColor3f(0.9, 0.2, 0.2)
+         glPushMatrix()
+-        glTranslatef(4.5, 0, 0)
+-        glScalef(1.0, 0.5, 0.5)
++        glTranslatef(-6.5, 0, 0)
++        glScalef(1.5, 3.0, 0.5)
+         glutSolidCube(1)
+         glPopMatrix()
+ 
+@@ -999,32 +1029,41 @@
+ # -------------------------------------------------
+ def keyboardListener(key, x, y):
+     global px, py, g_angle, first_person, game_over, paused, level, cheat_mode
+-    global current_arrow_type, arrow_count
++    global current_arrow_type, sprinting, stamina, arrow_count
+ 
++    # R key: restart game
+     if key == b'r':
+         restart_game()
+         return
+ 
++    # P key: toggle pause
+     if key == b'p':
+         if not game_over:
+             paused = not paused
+         return
+ 
++    # If game over, no controls
+     if game_over:
+         return
+ 
++    # Toggle cheat mode
+     if key == b'c':
+         cheat_mode = not cheat_mode
++        if cheat_mode:
++            arrow_count = 100  # Give 100 arrows in cheat mode
++        else:
++            arrow_count = min(arrow_count, max_arrows)  # Cap to max_arrows when turning off
+         return
+ 
++    # Arrow type selection
+     if key == b'1':
+-        current_arrow_type = 0
++        current_arrow_type = 0  # Normal
+         return
+     if key == b'2':
+-        current_arrow_type = 1
++        current_arrow_type = 1  # Fire
+         return
+     if key == b'3':
+-        current_arrow_type = 2
++        current_arrow_type = 2  # Ice
+         return
+ 
+     if paused and key in (b'w', b's', b'a', b'd'):
+@@ -1143,16 +1182,15 @@
+     global arrows, animals, game_over, paused, arrow_count, collectables, cheat_mode
+     global powerups, active_shield, active_speed, active_multishot
+     global current_arrow_type, frozen_animals, combo_count, combo_timer, score_multiplier
+-    global boss_animal, boss_health, boss_spawned_level
+-    global rocks, water_patches, bushes, particles
+-    global stamina, sprinting, time_of_day
++    global boss_animal, boss_health, rocks, water_patches, bushes, particles
++    global stamina, sprinting, time_of_day, last_boss_type
+ 
+     px, py = 0, -ARENA_SIZE + 80
+     g_angle = 90
+     player_health = 100
+     score = 0
+     level = 1
+-    next_level_score = 20
++    next_level_score = 30
+     arrow_count = max_arrows
+     game_over = False
+     paused = False
+@@ -1167,7 +1205,7 @@
+     score_multiplier = 1
+     boss_animal = None
+     boss_health = 0
+-    boss_spawned_level = 0
++    last_boss_type = -1
+     stamina = max_stamina
+     sprinting = False
+     time_of_day = 0
+@@ -1244,7 +1282,7 @@
+     global level, next_level_score, collectables, arrow_count
+     global active_shield, active_speed, active_multishot, powerups
+     global combo_count, combo_timer, score_multiplier, frozen_animals
+-    global boss_animal, boss_health, boss_spawned_level, particles, time_of_day
++    global boss_animal, boss_health, particles, time_of_day
+ 
+     if paused or game_over:
+         glutPostRedisplay()
+@@ -1282,11 +1320,8 @@
+         if frame - pw[3] > 1800:
+             powerups.remove(pw)
+ 
+-    # Spawn boss once per multiple-of-5 level
+-    if level % 5 == 0 and boss_animal is None and boss_spawned_level != level:
+-        spawn_boss()
+-
+-    if arrow_count <= 0 and not cheat_mode:
++    # Check if player ran out of arrows (game over)
++    if arrow_count <= 0:
+         game_over = True
+         glutPostRedisplay()
+         return
+@@ -1369,14 +1404,25 @@
+                 else:
+                     score_multiplier = 1
+ 
+-                points = 1 * score_multiplier
+-                if arr_type == 1:
++                # Animal type points: Lion=2, Bear=3, Elephant=4, others=1
++                if t_type == 0:  # Lion/Tiger
++                    points = 2 * score_multiplier
++                elif t_type == 1:  # Elephant
++                    points = 4 * score_multiplier
++                elif t_type == 3:  # Bear
++                    points = 3 * score_multiplier
++                else:
++                    points = 1 * score_multiplier
++
++                if arr_type == 1:  # Fire arrow 2x damage
+                     points *= 2
+                 score += points
+ 
++                # Ice arrow freezes
+                 if arr_type == 2:
+-                    frozen_animals[i] = 180
++                    frozen_animals[i] = 180  # 3 seconds
+ 
++                # Particle effect
+                 color = (0.8, 0.1, 0.1)
+                 if arr_type == 1:
+                     color = (1.0, 0.5, 0.1)
+@@ -1384,13 +1430,19 @@
+                     color = (0.3, 0.7, 1.0)
+                 create_particles(x, y, 15, color, 20)
+ 
++                # LEVEL SYSTEM: 30, 70 (+40), 120 (+50), 180 (+60)...
+                 old_level = level
+                 while score >= next_level_score:
+                     level += 1
+-                    next_level_score += 10
++                    # Calculate next level increment: 30 + (level-1)*10
++                    increment = 30 + (level - 1) * 10
++                    next_level_score += increment
+ 
+                 if level > old_level:
+                     spawn_level_collectables()
++                    # Spawn boss at level 5, then every 10 levels (15, 25, 35...)
++                    if boss_animal is None and (level == 5 or (level > 5 and (level - 5) % 10 == 0)):
++                        spawn_boss()
+ 
+                 x_new = random.randint(-GRID_LENGTH + WORLD_SPAWN_MARGIN,
+                                        GRID_LENGTH - WORLD_SPAWN_MARGIN)
+@@ -1606,17 +1658,9 @@
+         draw_text(350, 320, "Press R to Restart")
+ 
+     # UI buttons
+-    glMatrixMode(GL_PROJECTION)
+-    glPushMatrix()
+-    glLoadIdentity()
+-    gluOrtho2D(0, 1000, 0, 800)
+-    glMatrixMode(GL_MODELVIEW)
+-    glPushMatrix()
+-    glLoadIdentity()
++    glColor3f(0, 0, 0)  # Black color for buttons
+ 
+-    glColor3f(1, 1, 1)
+-
+-    # Play/Pause button
++    # Play/Pause button border (top-right corner)
+     glBegin(GL_LINE_LOOP)
+     glVertex2f(BTN_PLAY[0], BTN_PLAY[1])
+     glVertex2f(BTN_PLAY[2], BTN_PLAY[1])
+@@ -1678,15 +1722,9 @@
+     glVertex2f(tip_x - 2, tip_y - 6)
+     glEnd()
+ 
+-    glPopMatrix()
+-    glMatrixMode(GL_PROJECTION)
+-    glPopMatrix()
+-    glMatrixMode(GL_MODELVIEW)
+-
+     glutSwapBuffers()
+ 
+ 
+-
+ def main():
+     spawn_environment()
+     spawn_level_collectables()
